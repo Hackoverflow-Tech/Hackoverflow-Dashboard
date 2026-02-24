@@ -1,0 +1,35 @@
+name: Database Backup to Google Drive
+
+on:
+  schedule:
+    # ── Choose ONE of the lines below, comment out the others ──────────────────
+    - cron: '*/5 * * * *'    # Every 5 minutes  ← uncomment to use
+    # - cron: '*/10 * * * *' # Every 10 minutes ← uncomment to use
+    # - cron: '*/20 * * * *' # Every 20 minutes ← uncomment to use
+
+  # Lets you trigger a manual backup anytime from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger backup endpoint
+        run: |
+          echo "Triggering Drive backup at $(date -u)"
+
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
+            --max-time 60 \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/backup")
+
+          echo "HTTP status: $HTTP_STATUS"
+          echo "Response:"
+          cat response.json
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Backup failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+          echo "Backup uploaded to Google Drive successfully"
