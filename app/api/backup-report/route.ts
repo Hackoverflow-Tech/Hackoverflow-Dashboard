@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRecentBackupLogs } from '@/actions/backup-log';
-import { sendHourlyBackupReport } from '@/actions/backup-report-email';
+import { sendHourlyBackupReport } from '@/actions/email-report';
 
 export const runtime     = 'nodejs';
 export const maxDuration = 30;
