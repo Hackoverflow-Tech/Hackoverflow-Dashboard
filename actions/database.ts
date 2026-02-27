@@ -1,13 +1,13 @@
 'use server';
 
-import clientPromise from '@/lib/mongodb';
+import { getClient } from '@/lib/mongodb';
 import { DBParticipant } from '@/types';
 import { ObjectId } from 'mongodb';
 
 const DB_NAME = 'hackoverflow';
 const COLLECTION_NAME = 'participants';
 
-// ── Password ──────────────────────────────────────────────────────────────────/Users/observer/Desktop/Projects/Hackoverflow-Dashboard/actions/database.ts
+// ── Password ──────────────────────────────────────────────────────────────────
 const DB_PASSWORD = process.env.DB_PAGE_PASSWORD ?? 'hackoverflow-db-2024';
 
 export async function verifyDbPassword(password: string): Promise<boolean> {
@@ -20,9 +20,14 @@ type ParticipantDocument = Omit<DBParticipant, '_id'> & {
 };
 
 async function getCollection() {
-  const client = await clientPromise;
+  const client = await getClient();
   const db = client.db(DB_NAME);
   return db.collection<ParticipantDocument>(COLLECTION_NAME);
+}
+
+async function getDb() {
+  const client = await getClient();
+  return client.db(DB_NAME);
 }
 
 const escapeCell = (v: unknown): string => {
@@ -33,8 +38,6 @@ const escapeCell = (v: unknown): string => {
     : s;
 };
 
-// ── CSV column contract (export & import share this exact order) ──────────────
-// NOTE: not exported — 'use server' files can only export async functions
 const CSV_HEADERS = [
   'participantId',
   'name',
@@ -164,7 +167,6 @@ export async function upsertParticipantsFromCSV(
             filter: { participantId },
             update: {
               $set: doc,
-              // Preserve original createdAt — only set on first insert
               $setOnInsert: { createdAt: doc.createdAt },
             },
             upsert: true,
@@ -213,3 +215,82 @@ export async function getDbStats(): Promise<DbStats> {
   }
 }
 
+// ── Data Browser — list all collections ──────────────────────────────────────
+export async function getCollections(): Promise<string[]> {
+  try {
+    const db = await getDb();
+    const collections = await db.listCollections().toArray();
+    return collections.map(c => c.name).sort();
+  } catch (error) {
+    console.error('Error listing collections:', error);
+    throw new Error('Failed to list collections');
+  }
+}
+
+// ── Data Browser — paginated documents with optional search ──────────────────
+export async function getCollectionDocuments(
+  collectionName: string,
+  page = 1,
+  pageSize = 20,
+  search = ''
+): Promise<{ docs: Record<string, unknown>[]; total: number }> {
+  try {
+    const db = await getDb();
+    const col = db.collection(collectionName);
+
+    let query: Record<string, unknown> = {};
+
+    if (search.trim()) {
+      // Build a regex OR across all top-level string fields from a sample doc
+      const sample = await col.findOne({});
+      if (sample) {
+        const stringFields = Object.entries(sample)
+          .filter(([k, v]) => typeof v === 'string' && k !== '_id')
+          .map(([k]) => k);
+        if (stringFields.length > 0) {
+          query = {
+            $or: stringFields.map(f => ({
+              [f]: { $regex: search.trim(), $options: 'i' },
+            })),
+          };
+        }
+      }
+    }
+
+    const [rawDocs, total] = await Promise.all([
+      col.find(query).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+      col.countDocuments(query),
+    ]);
+
+    // Serialize: convert ObjectId → string, Date → ISO string
+    const docs = rawDocs.map(doc =>
+      JSON.parse(
+        JSON.stringify(doc, (_key, val) => {
+          if (val && typeof val === 'object' && val.constructor?.name === 'ObjectId') {
+            return val.toString();
+          }
+          if (val instanceof Date) return val.toISOString();
+          return val;
+        })
+      )
+    );
+
+    return { docs, total };
+  } catch (error) {
+    console.error('Error fetching collection documents:', error);
+    throw new Error('Failed to fetch documents');
+  }
+}
+
+// ── Drop an entire collection ─────────────────────────────────────────────────
+export async function deleteCollection(collectionName: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.dropCollection(collectionName);
+  } catch (error) {
+    console.error('Error dropping collection:', error);
+    throw new Error(
+      error instanceof Error ? error.message : 'Failed to delete collection'
+    );
+  }
+}
