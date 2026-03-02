@@ -37,6 +37,31 @@ export const DEFAULT_OVERLAYS: CardOverlays = {
   },
 };
 
+// ─── Font-face injection (preview only) ──────────────────────────────────────
+// Inject @font-face once so the browser preview uses the same .ttf files.
+if (typeof document !== 'undefined') {
+  const STYLE_ID = '__id-card-fonts__';
+  if (!document.getElementById(STYLE_ID)) {
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      @font-face {
+        font-family: 'HO2';
+        src: url('/fonts/HO2.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'HO';
+        src: url('/fonts/HO.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function ptToPx(pt: number, previewWidth: number) {
   return pt * (25.4 / 72) * (previewWidth / CARD_W_MM);
@@ -64,41 +89,51 @@ export const IDCardCard = forwardRef<HTMLDivElement, IDCardCardProps>(
     return (
       <div
         ref={ref}
-        style={{ position: 'relative', width, height, overflow: 'hidden', userSelect: 'none', flexShrink: 0, backgroundColor: '#fff' }}
+        style={{ position: 'relative', width, height, userSelect: 'none', flexShrink: 0 }}
       >
-        {/* SVG Background */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/Images/id.svg"
-          alt=""
-          crossOrigin="anonymous"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-        />
+        {/* SVG Background — clipped to card bounds */}
+        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/Images/id.svg"
+            alt=""
+            crossOrigin="anonymous"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+          />
+        </div>
 
-        {/* Name overlay */}
+        {/* Name overlay — HO2 font */}
         <div style={{
           position: 'absolute',
           left: xPx(overlays.name.centerXmm),
           top:  yPx(overlays.name.ymm),
           transform: 'translate(-50%, -100%)',
-          color: '#fff', fontFamily: 'monospace', fontWeight: 'bold',
-          fontSize: nameFontPx, whiteSpace: 'nowrap', pointerEvents: 'none',
+          color: '#fff',
+          fontFamily: "'HO2', monospace",
+          fontWeight: 'normal',
+          fontSize: nameFontPx,
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
         }}>
           {data.name.toUpperCase()}
         </div>
 
-        {/* Team ID overlay */}
+        {/* Team ID overlay — HO font */}
         {overlays.teamId.show && data.teamId && (
           <div style={{
             position: 'absolute',
             left: xPx(overlays.teamId.centerXmm),
             top:  yPx(overlays.teamId.ymm),
             transform: 'translate(-50%, -100%)',
-            color: '#fff', fontFamily: 'monospace', fontWeight: 'normal',
-            fontSize: teamIdFontPx, whiteSpace: 'nowrap', pointerEvents: 'none',
+            color: '#fff',
+            fontFamily: "'HO', monospace",
+            fontWeight: 'normal',
+            fontSize: teamIdFontPx,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
             opacity: 0.85,
           }}>
-            {data.teamId}
+            {`Team id - ${data.teamId}`}
           </div>
         )}
 
@@ -197,7 +232,7 @@ export default function IDCardEditor({
     else if (type === 'teamId')
       onOverlaysChange({ ...overlays, teamId: { ...overlays.teamId, centerXmm: cx(newX), ymm: cy(newY) } });
     else
-      onOverlaysChange({ ...overlays, qr:     { ...overlays.qr,     xmm: Math.max(0, Math.min(CARD_W_MM - overlays.qr.sizemm, newX)), ymm: Math.max(0, Math.min(CARD_H_MM - overlays.qr.sizemm, newY)) } });
+      onOverlaysChange({ ...overlays, qr: { ...overlays.qr, xmm: Math.max(0, Math.min(CARD_W_MM - overlays.qr.sizemm, newX)), ymm: Math.max(0, Math.min(CARD_H_MM - overlays.qr.sizemm, newY)) } });
   };
 
   const handlePointerUp = () => { drag.current = null; };
@@ -221,7 +256,7 @@ export default function IDCardEditor({
 
         <div style={{
           position: 'relative', width: previewWidth, height: previewH,
-          overflow: 'hidden', userSelect: 'none',
+          overflow: 'visible', userSelect: 'none',
           outline: '1px solid rgba(255,255,255,0.12)', outlineOffset: '-1px',
         }}>
           {/* SVG Background */}
@@ -229,7 +264,7 @@ export default function IDCardEditor({
           <img src="/Images/id.svg" alt=""
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
 
-          {/* ── Draggable Name ── */}
+          {/* ── Draggable Name — HO2 font ── */}
           <div
             onPointerDown={(e) => handlePointerDown(e, 'name')}
             onPointerMove={(e) => handlePointerMove(e, 'name')}
@@ -240,15 +275,18 @@ export default function IDCardEditor({
               left: xMmToPx(overlays.name.centerXmm),
               top:  yMmToPx(overlays.name.ymm),
               transform: 'translate(-50%, -100%)',
-              color: '#fff', fontFamily: 'monospace', fontWeight: 'bold',
-              fontSize: nameFontPx, whiteSpace: 'nowrap',
+              color: '#fff',
+              fontFamily: "'HO2', monospace",
+              fontWeight: 'normal',
+              fontSize: nameFontPx,
+              whiteSpace: 'nowrap',
               ...dragStyle,
             }}
           >
             {data.name.toUpperCase()}
           </div>
 
-          {/* ── Draggable Team ID ── */}
+          {/* ── Draggable Team ID — HO font ── */}
           {overlays.teamId.show && (
             <div
               onPointerDown={(e) => handlePointerDown(e, 'teamId')}
@@ -260,12 +298,16 @@ export default function IDCardEditor({
                 left: xMmToPx(overlays.teamId.centerXmm),
                 top:  yMmToPx(overlays.teamId.ymm),
                 transform: 'translate(-50%, -100%)',
-                color: '#fff', fontFamily: 'monospace', fontWeight: 'normal',
-                fontSize: teamIdFontPx, whiteSpace: 'nowrap', opacity: 0.85,
+                color: '#fff',
+                fontFamily: "'HO', monospace",
+                fontWeight: 'normal',
+                fontSize: teamIdFontPx,
+                whiteSpace: 'nowrap',
+                opacity: 0.85,
                 ...dragStyle,
               }}
             >
-              {data.teamId || 'TEAM-000'}
+              {`Team id - ${data.teamId || 'TEAM-000'}`}
             </div>
           )}
 
@@ -305,13 +347,20 @@ export default function IDCardEditor({
             <span style={{ fontFamily: 'monospace', fontSize: '0.55rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>DRAGGABLE</span>
           </div>
         </div>
+
+        {/* Font legend */}
+        <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+          <span style={{ fontFamily: 'monospace', fontSize: '0.5rem', color: 'rgba(255,255,255,0.2)', letterSpacing: '0.06em' }}>
+            NAME → HO2.ttf &nbsp;|&nbsp; TEAM ID → HO.ttf
+          </span>
+        </div>
       </div>
 
       {/* ── Controls panel ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: '200px', flex: 1 }}>
 
         {/* Name */}
-        <ControlGroup label="NAME TEXT">
+        <ControlGroup label="NAME TEXT  (HO2.ttf)">
           <SliderControl label="CENTER X" unit="mm" value={overlays.name.centerXmm} min={0} max={CARD_W_MM} step={0.1}
             onChange={(v) => onOverlaysChange({ ...overlays, name: { ...overlays.name, centerXmm: v } })} />
           <SliderControl label="Y (BASELINE)" unit="mm" value={overlays.name.ymm} min={0} max={CARD_H_MM} step={0.1}
@@ -321,7 +370,7 @@ export default function IDCardEditor({
         </ControlGroup>
 
         {/* Team ID */}
-        <ControlGroup label="TEAM ID">
+        <ControlGroup label="TEAM ID  (HO.ttf)">
           {/* Toggle */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <span style={{ fontFamily: 'monospace', fontSize: '0.6rem', color: 'rgba(255,255,255,0.4)', letterSpacing: '0.07em' }}>SHOW ON CARD</span>
@@ -384,10 +433,10 @@ export default function IDCardEditor({
           <div style={{ color: 'rgba(255,255,255,0.35)', marginBottom: '0.35rem', letterSpacing: '0.06em' }}>CURRENT VALUES (MM)</div>
           <div>name.centerX   = {overlays.name.centerXmm.toFixed(2)}</div>
           <div>name.y         = {overlays.name.ymm.toFixed(2)}</div>
-          <div>name.size      = {overlays.name.fontSizePt.toFixed(1)}pt</div>
+          <div>name.size      = {overlays.name.fontSizePt.toFixed(1)}pt  <span style={{ opacity: 0.5 }}>[HO2]</span></div>
           <div style={{ marginTop: '0.35rem' }}>teamId.centerX = {overlays.teamId.centerXmm.toFixed(2)}</div>
           <div>teamId.y       = {overlays.teamId.ymm.toFixed(2)}</div>
-          <div>teamId.size    = {overlays.teamId.fontSizePt.toFixed(1)}pt</div>
+          <div>teamId.size    = {overlays.teamId.fontSizePt.toFixed(1)}pt  <span style={{ opacity: 0.5 }}>[HO]</span></div>
           <div>teamId.show    = {overlays.teamId.show ? 'true' : 'false'}</div>
           <div style={{ marginTop: '0.35rem' }}>qr.x    = {overlays.qr.xmm.toFixed(2)}</div>
           <div>qr.y    = {overlays.qr.ymm.toFixed(2)}</div>

@@ -78,7 +78,7 @@ export default function GeneratorPage() {
           phone:         p.phone || '',
           participantId: p.participantId,
           qrCodeDataURL: await generateQRCode(p.participantId),
-          teamId:        p.teamId,  // ← pulled from DB
+          teamId:        p.teamId,
           selected:      true,
         }))
       );
@@ -147,7 +147,7 @@ export default function GeneratorPage() {
         hackathonInfo,
         'id-cards',
         (cur, tot) => setProgress(Math.round((cur / tot) * 100)),
-        overlays, // ← pass live positions from the editor
+        overlays,
       );
       setStatus(`Generated ${selected.length} vector PDF cards`);
     } catch (err) {
@@ -359,7 +359,6 @@ export default function GeneratorPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '1rem', maxHeight: '600px', overflowY: 'auto', padding: '0.25rem' }}>
               {cards.map((card, i) => {
                 const RENDER_W  = 400;
-                const RENDER_H  = RENDER_W * (74.98 / 60.02);
                 const DISPLAY_W = 160;
                 const scale     = DISPLAY_W / RENDER_W;
                 return (

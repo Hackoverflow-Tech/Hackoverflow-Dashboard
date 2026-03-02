@@ -1,9 +1,9 @@
 /**
  * Vector PDF Generation for ID Cards
  *
- * Generates crisp PDF ID cards using jsPDF.
- * SVG background is rendered as high-DPI PNG (7x scale).
- * Name, Team ID + QR code positions are driven by CardOverlays from IDCardEditor.
+ * Font assignments:
+ *   Name text  → HO2.ttf
+ *   Team ID    → HO.ttf
  *
  * @module utils/generate-pdf
  */
@@ -22,33 +22,69 @@ const SVG_W_PX = 226.77;
 const SVG_H_PX = 283.46;
 
 // ─── Font cache ───────────────────────────────────────────────────────────────
-let cachedFontBase64: string | null = null;
-let fontLoadFailed = false;
 
-async function loadCustomFont(): Promise<string> {
-  if (cachedFontBase64) return cachedFontBase64;
-  if (fontLoadFailed) return '';
+// HO2.ttf — used for participant name
+let cachedHO2Base64: string | null = null;
+let ho2LoadFailed = false;
+
+// HO.ttf — used for Team ID line
+let cachedHOBase64: string | null = null;
+let hoLoadFailed = false;
+
+async function loadFont(
+  path: string,
+  cache: { value: string | null },
+  failed: { value: boolean },
+  label: string,
+): Promise<string> {
+  if (cache.value) return cache.value;
+  if (failed.value) return '';
   try {
-    const res = await fetch('/fonts/HO.ttf');
+    const res = await fetch(path);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const buf   = await res.arrayBuffer();
     const bytes = new Uint8Array(buf);
     let binary  = '';
     for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-    cachedFontBase64 = btoa(binary);
-    console.log('✓ Custom font HO loaded');
-    return cachedFontBase64;
+    cache.value = btoa(binary);
+    console.log(`✓ Font loaded: ${label}`);
+    return cache.value;
   } catch (err) {
-    console.warn('Custom font not loaded, falling back to Helvetica Bold:', err);
-    fontLoadFailed = true;
+    console.warn(`Font not loaded (${label}), will fall back to Helvetica:`, err);
+    failed.value = true;
     return '';
   }
 }
 
-function addFontToPDF(pdf: jsPDF, fontBase64: string): boolean {
-  if (!fontBase64) return false;
+async function loadNameFont(): Promise<string> {
+  const cache  = { get value() { return cachedHO2Base64; }, set value(v) { cachedHO2Base64 = v; } };
+  const failed = { get value() { return ho2LoadFailed;   }, set value(v) { ho2LoadFailed   = v; } };
+  return loadFont('/fonts/HO2.ttf', cache, failed, 'HO2 (name)');
+}
+
+async function loadTeamIdFont(): Promise<string> {
+  const cache  = { get value() { return cachedHOBase64; }, set value(v) { cachedHOBase64 = v; } };
+  const failed = { get value() { return hoLoadFailed;   }, set value(v) { hoLoadFailed   = v; } };
+  return loadFont('/fonts/HO.ttf', cache, failed, 'HO (teamId)');
+}
+
+/** Register HO2 (name font) into a jsPDF instance. Returns true on success. */
+function addHO2Font(pdf: jsPDF, base64: string): boolean {
+  if (!base64) return false;
   try {
-    pdf.addFileToVFS('HO-Regular.ttf', fontBase64);
+    pdf.addFileToVFS('HO2-Regular.ttf', base64);
+    pdf.addFont('HO2-Regular.ttf', 'HO2', 'normal');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Register HO (teamId font) into a jsPDF instance. Returns true on success. */
+function addHOFont(pdf: jsPDF, base64: string): boolean {
+  if (!base64) return false;
+  try {
+    pdf.addFileToVFS('HO-Regular.ttf', base64);
     pdf.addFont('HO-Regular.ttf', 'HO', 'normal');
     return true;
   } catch {
@@ -77,7 +113,10 @@ async function loadSVGAsHighDPIPNG(): Promise<string> {
       console.log(`✓ SVG → PNG at ${canvas.width}×${canvas.height}px (${HIGH_DPI_SCALE}x)`);
       resolve(canvas.toDataURL('image/png'));
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG render failed')); };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('SVG render failed'));
+    };
     img.src = url;
   });
 }
@@ -87,7 +126,8 @@ async function drawCard(
   pdf: jsPDF,
   data: IDCardData,
   backgroundPNG: string,
-  customFont: string,
+  nameFontBase64: string,   // HO2.ttf
+  teamIdFontBase64: string, // HO.ttf
   overlays: CardOverlays,
 ): Promise<void> {
   const W = pdf.internal.pageSize.getWidth();
@@ -101,11 +141,12 @@ async function drawCard(
     pdf.rect(0, 0, W, H, 'F');
   }
 
-  const hasFont = addFontToPDF(pdf, customFont);
+  const hasNameFont   = addHO2Font(pdf, nameFontBase64);
+  const hasTeamIdFont = addHOFont(pdf, teamIdFontBase64);
 
-  // ── Name ──
+  // ── Name  (HO2.ttf) ──
   pdf.setTextColor(255, 255, 255);
-  pdf.setFont(hasFont ? 'HO' : 'helvetica', hasFont ? 'normal' : 'bold');
+  pdf.setFont(hasNameFont ? 'HO2' : 'helvetica', hasNameFont ? 'normal' : 'bold');
   pdf.setFontSize(overlays.name.fontSizePt);
 
   const nameParts     = data.name.toUpperCase().split(' ');
@@ -115,7 +156,7 @@ async function drawCard(
     const mid   = Math.ceil(nameParts.length / 2);
     const line1 = nameParts.slice(0, mid).join(' ');
     const line2 = nameParts.slice(mid).join(' ');
-    pdf.text(line1, overlays.name.centerXmm, overlays.name.ymm,                { align: 'center', maxWidth: W * 0.9 });
+    pdf.text(line1, overlays.name.centerXmm, overlays.name.ymm,                 { align: 'center', maxWidth: W * 0.9 });
     pdf.text(line2, overlays.name.centerXmm, overlays.name.ymm + lineSpacingMM, { align: 'center', maxWidth: W * 0.9 });
   } else {
     pdf.text(data.name.toUpperCase(), overlays.name.centerXmm, overlays.name.ymm, {
@@ -123,14 +164,17 @@ async function drawCard(
     });
   }
 
-  // ── Team ID ──
+  // ── Team ID  (HO.ttf) ──
   if (overlays.teamId.show && data.teamId) {
     pdf.setFontSize(overlays.teamId.fontSizePt);
-    pdf.setTextColor(220, 220, 220); // slightly dimmer than name
-    pdf.setFont(hasFont ? 'HO' : 'helvetica', hasFont ? 'normal' : 'normal');
-    pdf.text(data.teamId, overlays.teamId.centerXmm, overlays.teamId.ymm, {
-      align: 'center', maxWidth: W * 0.9,
-    });
+    pdf.setTextColor(220, 220, 220);
+    pdf.setFont(hasTeamIdFont ? 'HO' : 'helvetica', 'normal');
+    pdf.text(
+      `Team id - ${data.teamId}`,
+      overlays.teamId.centerXmm,
+      overlays.teamId.ymm,
+      { align: 'center' },
+    );
   }
 
   // ── QR Code ──
@@ -163,9 +207,13 @@ export async function generateVectorPDF(
   fileName = 'id-card.pdf',
   overlays: CardOverlays = DEFAULT_OVERLAYS,
 ): Promise<void> {
-  const [backgroundPNG, customFont] = await Promise.all([loadSVGAsHighDPIPNG(), loadCustomFont()]);
+  const [backgroundPNG, nameFontBase64, teamIdFontBase64] = await Promise.all([
+    loadSVGAsHighDPIPNG(),
+    loadNameFont(),
+    loadTeamIdFont(),
+  ]);
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: CARD_FORMAT });
-  await drawCard(pdf, data, backgroundPNG, customFont, overlays);
+  await drawCard(pdf, data, backgroundPNG, nameFontBase64, teamIdFontBase64, overlays);
   pdf.save(fileName);
 }
 
@@ -180,7 +228,12 @@ export async function generateBulkVectorPDFs(
   overlays: CardOverlays = DEFAULT_OVERLAYS,
 ): Promise<void> {
   // Load shared resources once
-  const [backgroundPNG, customFont] = await Promise.all([loadSVGAsHighDPIPNG(), loadCustomFont()]);
+  const [backgroundPNG, nameFontBase64, teamIdFontBase64] = await Promise.all([
+    loadSVGAsHighDPIPNG(),
+    loadNameFont(),
+    loadTeamIdFont(),
+  ]);
+
   const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
 
@@ -188,7 +241,7 @@ export async function generateBulkVectorPDFs(
     try {
       const card = cards[i];
       const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: CARD_FORMAT });
-      await drawCard(pdf, card, backgroundPNG, customFont, overlays);
+      await drawCard(pdf, card, backgroundPNG, nameFontBase64, teamIdFontBase64, overlays);
       zip.file(`${card.name.replace(/\s+/g, '_')}_${card.participantId}.pdf`, pdf.output('blob'));
       onProgress?.(i + 1, cards.length);
     } catch (err) {
