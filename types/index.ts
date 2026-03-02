@@ -90,6 +90,8 @@ export interface DBParticipant {
 
   // ── Venue ─────────────────────────────────────────────
   institute?: string;
+  /** State / province the participant's institute is located in */
+  state?: string;
   labAllotted?: string;
   wifiCredentials?: {
     ssid?: string;
