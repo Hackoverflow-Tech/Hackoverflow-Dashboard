@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRecentBackupLogs } from '@/actions/backup-log';
 import { sendHourlyBackupReport } from '@/actions/email-report';
+import { getBotConfigSnapshot } from '@/actions/bot-config-snapshot';
+import { getBotStatusSnapshot } from '@/actions/bot-status-snapshot';
 
 export const runtime     = 'nodejs';
 export const maxDuration = 30;
@@ -20,8 +22,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const logs = await getRecentBackupLogs(1);
-    await sendHourlyBackupReport(logs, recipient);
+    const [logs, botConfig, botStatus] = await Promise.all([
+      getRecentBackupLogs(1),
+      getBotConfigSnapshot(),
+      getBotStatusSnapshot(),
+    ]);
+
+    await sendHourlyBackupReport(logs, recipient, botConfig, botStatus);
 
     console.log(`[backup-report] Sent report for ${logs.length} entries to ${recipient}`);
 
