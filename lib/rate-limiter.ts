@@ -1,204 +1,105 @@
 /**
- * Rate Limiter Implementation
+ * In-Memory Sliding Window Rate Limiter (Harmonized)
  * 
- * A sliding window rate limiter for API routes using in-memory storage.
- * For production at scale, consider using Redis-based rate limiting.
+ * Harmonzied across Dashboard and Checkin repositories to provide
+ * identical rate limiting logic.
+ * 
+ * Note: This implementation is local to the server process.
  * 
  * @module lib/rate-limiter
  */
 
-import type { NextRequest } from 'next/server';
+import { NextRequest } from 'next/server';
 
-/**
- * Configuration options for rate limiting
- */
+// Rate limit configuration options
 export interface RateLimitConfig {
-  /** Maximum number of requests allowed within the window */
   readonly maxRequests: number;
-  /** Time window in milliseconds */
   readonly windowMs: number;
-  /** Optional identifier prefix for different route groups */
   readonly keyPrefix?: string;
 }
 
-/**
- * Result of a rate limit check
- */
+// Result of a rate limit check
 export interface RateLimitResult {
-  /** Whether the request is allowed */
   readonly allowed: boolean;
-  /** Number of remaining requests in the current window */
   readonly remaining: number;
-  /** Unix timestamp when the rate limit resets */
   readonly resetTime: number;
-  /** Total requests made in current window */
   readonly currentCount: number;
 }
 
 /**
- * Internal structure for tracking request timestamps
+ * In-memory store for rate limit windows
  */
-interface RateLimitEntry {
-  timestamps: number[];
-  lastCleanup: number;
-}
+const rateLimitStore = new Map<string, number[]>();
+
+// Cleanup interval to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamps] of rateLimitStore.entries()) {
+    if (timestamps.length === 0) {
+      rateLimitStore.delete(key);
+    }
+  }
+}, 300000); // Every 5 minutes
 
 /**
- * In-memory store for rate limiting
- * Key format: `${keyPrefix}:${identifier}`
- */
-const rateLimitStore = new Map<string, RateLimitEntry>();
-
-/**
- * Cleanup interval for expired entries (5 minutes)
- */
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-
-/**
- * Extracts a unique identifier from the request for rate limiting
- * 
- * Priority:
- * 1. X-Forwarded-For header (for proxied requests)
- * 2. X-Real-IP header
- * 3. Connection remote address (fallback)
- * 
- * @param request - The incoming Next.js request
- * @returns A string identifier for rate limiting
+ * Extracts a unique identifier from the request
  */
 export function getClientIdentifier(request: NextRequest): string {
-  // Check for forwarded IP (common with proxies/load balancers)
   const forwardedFor = request.headers.get('x-forwarded-for');
   if (forwardedFor) {
-    // Take the first IP in the chain (original client)
     const clientIp = forwardedFor.split(',')[0]?.trim();
     if (clientIp) return clientIp;
   }
 
-  // Check for X-Real-IP header
   const realIp = request.headers.get('x-real-ip');
   if (realIp) return realIp;
 
-  // Fallback to a hash of user agent + some request info
-  const userAgent = request.headers.get('user-agent') ?? 'unknown';
-  const acceptLanguage = request.headers.get('accept-language') ?? 'unknown';
-  
-  // Create a simple hash for anonymous identification
-  return `anon:${simpleHash(userAgent + acceptLanguage)}`;
+  return 'anonymous';
 }
 
 /**
- * Simple string hash function for fallback identification
+ * Checks and updates rate limit using In-Memory Sliding Window
  */
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash).toString(36);
-}
-
-/**
- * Cleans up old entries from the rate limit store
- * Called periodically to prevent memory leaks
- */
-function cleanupExpiredEntries(windowMs: number): void {
-  const now = Date.now();
-  const cutoff = now - windowMs;
-
-  for (const [key, entry] of rateLimitStore.entries()) {
-    // Remove timestamps outside the window
-    entry.timestamps = entry.timestamps.filter((ts) => ts > cutoff);
-    
-    // Remove entries with no remaining timestamps
-    if (entry.timestamps.length === 0) {
-      rateLimitStore.delete(key);
-    }
-  }
-}
-
-/**
- * Checks and updates rate limit for a given identifier
- * 
- * Uses a sliding window algorithm:
- * - Tracks individual request timestamps
- * - Counts requests within the sliding window
- * - Automatically cleans up old timestamps
- * 
- * @param identifier - Unique identifier for the client
- * @param config - Rate limit configuration
- * @returns Rate limit result with allowed status and metadata
- * 
- * @example
- * ```typescript
- * const result = checkRateLimit('192.168.1.1', {
- *   maxRequests: 5,
- *   windowMs: 60000,
- *   keyPrefix: 'login'
- * });
- * 
- * if (!result.allowed) {
- *   return new Response('Too many requests', { status: 429 });
- * }
- * ```
- */
-export function checkRateLimit(
+export async function checkRateLimit(
   identifier: string,
   config: RateLimitConfig
-): RateLimitResult {
+): Promise<RateLimitResult> {
   const { maxRequests, windowMs, keyPrefix = 'default' } = config;
-  const key = `${keyPrefix}:${identifier}`;
+  const key = `ratelimit:${keyPrefix}:${identifier}`;
   const now = Date.now();
   const windowStart = now - windowMs;
 
-  // Get or create entry
-  let entry = rateLimitStore.get(key);
-  
-  if (!entry) {
-    entry = {
-      timestamps: [],
-      lastCleanup: now,
-    };
-    rateLimitStore.set(key, entry);
-  }
+  let timestamps = rateLimitStore.get(key) || [];
 
-  // Periodic cleanup of all entries
-  if (now - entry.lastCleanup > CLEANUP_INTERVAL_MS) {
-    cleanupExpiredEntries(windowMs);
-    entry.lastCleanup = now;
-  }
+  // 1. Remove timestamps outside the sliding window
+  timestamps = timestamps.filter(ts => ts > windowStart);
 
-  // Filter timestamps within the current window
-  entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart);
-
-  // Check if rate limit exceeded
-  const currentCount = entry.timestamps.length;
-  const allowed = currentCount < maxRequests;
+  // 2. Check if allowed
+  const count = timestamps.length;
+  const allowed = count < maxRequests;
 
   if (allowed) {
-    // Record this request
-    entry.timestamps.push(now);
+    // 3. Record current hit
+    timestamps.push(now);
   }
 
-  // Calculate reset time (when the oldest request in window expires)
-  const oldestTimestamp = entry.timestamps[0] ?? now;
-  const resetTime = oldestTimestamp + windowMs;
+  // 4. Update store
+  rateLimitStore.set(key, timestamps);
+
+  // 5. Calculate reset time
+  const oldestTs = timestamps.length > 0 ? timestamps[0] : now;
+  const resetTime = oldestTs + windowMs;
 
   return {
     allowed,
-    remaining: Math.max(0, maxRequests - currentCount - (allowed ? 1 : 0)),
+    remaining: Math.max(0, maxRequests - timestamps.length),
     resetTime,
-    currentCount: currentCount + (allowed ? 1 : 0),
+    currentCount: timestamps.length,
   };
 }
 
 /**
- * Creates rate limit headers for the response
- * 
- * @param result - The rate limit check result
- * @param config - The rate limit configuration
- * @returns Headers object with rate limit information
+ * Standard headers creator
  */
 export function createRateLimitHeaders(
   result: RateLimitResult,
@@ -208,48 +109,19 @@ export function createRateLimitHeaders(
     'X-RateLimit-Limit': config.maxRequests.toString(),
     'X-RateLimit-Remaining': result.remaining.toString(),
     'X-RateLimit-Reset': Math.ceil(result.resetTime / 1000).toString(),
-    'Retry-After': result.allowed 
-      ? '0' 
+    'Retry-After': result.allowed
+      ? '0'
       : Math.ceil((result.resetTime - Date.now()) / 1000).toString(),
   };
 }
 
 /**
- * Preset rate limit configurations for common use cases
+ * Preset Rate limiters (Shared Logic)
  */
 export const RateLimitPresets = {
-  /** Strict rate limiting for authentication endpoints (5 req/min) */
-  AUTH: {
-    maxRequests: 5,
-    windowMs: 60 * 1000,
-    keyPrefix: 'auth',
-  },
-  
-  /** Very strict rate limiting for login attempts (3 req/min) */
-  LOGIN: {
-    maxRequests: 3,
-    windowMs: 60 * 1000,
-    keyPrefix: 'login',
-  },
-  
-  /** Standard API rate limiting (100 req/min) */
-  API: {
-    maxRequests: 100,
-    windowMs: 60 * 1000,
-    keyPrefix: 'api',
-  },
-  
-  /** Lenient rate limiting for read operations (200 req/min) */
-  READ: {
-    maxRequests: 200,
-    windowMs: 60 * 1000,
-    keyPrefix: 'read',
-  },
-  
-  /** Moderate rate limiting for email sending (10 req/hour) */
-  SEND_EMAIL: {
-    maxRequests: 10,
-    windowMs: 60 * 60 * 1000,
-    keyPrefix: 'email',
-  },
-} as const satisfies Record<string, RateLimitConfig>;
+  AUTH: { maxRequests: 5, windowMs: 60 * 1000, keyPrefix: 'auth' },
+  LOGIN: { maxRequests: 3, windowMs: 60 * 1000, keyPrefix: 'login' },
+  API: { maxRequests: 100, windowMs: 60 * 1000, keyPrefix: 'api' },
+  READ: { maxRequests: 200, windowMs: 60 * 1000, keyPrefix: 'read' },
+  SEND_EMAIL: { maxRequests: 10, windowMs: 60 * 60 * 1000, keyPrefix: 'email' },
+} as const;

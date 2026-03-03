@@ -74,8 +74,8 @@ export async function sendEmailsAction(
   try {
     // Step 1: Rate limiting check
     const clientId = getClientIdForAction();
-    const rateLimitResult = checkRateLimit(clientId, RateLimitPresets.SEND_EMAIL);
-    
+    const rateLimitResult = await checkRateLimit(clientId, RateLimitPresets.SEND_EMAIL);
+
     if (!rateLimitResult.allowed) {
       return {
         success: false,
@@ -99,29 +99,29 @@ export async function sendEmailsAction(
 
     // Step 3: Input validation
     if (!subject?.trim()) {
-      return { 
-        success: false, 
-        message: 'Subject is required', 
-        sent: 0, 
-        failed: 0 
+      return {
+        success: false,
+        message: 'Subject is required',
+        sent: 0,
+        failed: 0
       };
     }
 
     if (!htmlContent?.trim()) {
-      return { 
-        success: false, 
-        message: 'Email content is required', 
-        sent: 0, 
-        failed: 0 
+      return {
+        success: false,
+        message: 'Email content is required',
+        sent: 0,
+        failed: 0
       };
     }
 
     if (!recipients || recipients.length === 0) {
-      return { 
-        success: false, 
-        message: 'At least one recipient is required', 
-        sent: 0, 
-        failed: 0 
+      return {
+        success: false,
+        message: 'At least one recipient is required',
+        sent: 0,
+        failed: 0
       };
     }
 
@@ -211,15 +211,15 @@ export async function validateEmailAction(email: string): Promise<{
     }
 
     const valid = isValidEmail(email);
-    return { 
-      valid, 
-      error: valid ? undefined : 'Invalid email format' 
+    return {
+      valid,
+      error: valid ? undefined : 'Invalid email format'
     };
 
   } catch (error) {
-    return { 
-      valid: false, 
-      error: 'Error validating email address' 
+    return {
+      valid: false,
+      error: 'Error validating email address'
     };
   }
 }

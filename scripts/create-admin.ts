@@ -29,7 +29,7 @@ interface AdminUser {
  */
 function getMongoDBURI(): string {
   const uri = process.env.MONGODB_URI;
-  
+
   if (!uri) {
     console.error('❌ MONGODB_URI not found in environment variables');
     console.log('');
@@ -41,7 +41,7 @@ function getMongoDBURI(): string {
     console.log('   MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database');
     process.exit(1);
   }
-  
+
   return uri;
 }
 
@@ -61,8 +61,8 @@ async function createAdminUser(client: MongoClient): Promise<void> {
 
   // Check if admin already exists
   console.log('🔍 Checking for existing admin user...');
-  const existingAdmin = await usersCollection.findOne({ 
-    email: CONFIG.ADMIN_EMAIL 
+  const existingAdmin = await usersCollection.findOne({
+    email: CONFIG.ADMIN_EMAIL
   });
 
   if (existingAdmin) {
@@ -111,34 +111,34 @@ async function createAdminUser(client: MongoClient): Promise<void> {
  */
 async function main(): Promise<void> {
   let client: MongoClient | undefined;
-  
+
   try {
     const mongoURI = getMongoDBURI();
-    
+
     console.log('🚀 HackOverflow Admin User Setup');
     console.log('=====================================');
     console.log('');
     console.log('🔗 Connecting to MongoDB...');
     console.log(`   📍 URI: ${maskMongoURI(mongoURI)}`);
     console.log(`   🗄️  Database: ${CONFIG.DB_NAME}`);
-    
+
     client = new MongoClient(mongoURI);
     await client.connect();
-    
+
     // Test connection
     await client.db(CONFIG.DB_NAME).command({ ping: 1 });
     console.log('✅ Successfully connected to MongoDB');
     console.log('');
 
     await createAdminUser(client);
-    
+
   } catch (error) {
     console.error('');
     console.error('❌ Error during admin user creation:');
-    
+
     if (error instanceof Error) {
       console.error(`   💥 ${error.message}`);
-      
+
       // Provide helpful error messages for common issues
       if (error.message.includes('ENOTFOUND') || error.message.includes('ETIMEDOUT')) {
         console.error('');
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     } else {
       console.error(`   💥 Unknown error: ${error}`);
     }
-    
+
     process.exit(1);
   } finally {
     if (client) {

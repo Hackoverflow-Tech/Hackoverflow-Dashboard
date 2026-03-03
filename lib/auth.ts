@@ -1,8 +1,10 @@
 /**
- * Authentication Utilities
+ * Authentication Utilities (Harmonized)
  * 
  * Centralized authentication logic including JWT handling,
  * session verification, and security utilities.
+ * 
+ * Shared between Dashboard and Checkin repositories.
  * 
  * @module lib/auth
  */
@@ -15,37 +17,21 @@ import clientPromise from './mongodb';
 import { ObjectId } from 'mongodb';
 
 /**
- * Environment configuration with validation
- */
-const EnvSchema = z.object({
-  JWT_SECRET: z
-    .string()
-    .min(32, 'JWT_SECRET must be at least 32 characters for security'),
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-});
-
-/**
  * Gets and validates the JWT secret from environment
- * Throws an error in production if not properly configured
  */
 function getJWTSecret(): string {
   const secret = process.env.JWT_SECRET;
-  
+
   if (!secret) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('JWT_SECRET is required in production');
     }
-    // Development fallback with warning
     console.warn(
       '⚠️ WARNING: Using default JWT secret. Set JWT_SECRET in environment variables.'
     );
     return 'development-only-secret-do-not-use-in-production-min-32-chars';
   }
-  
-  if (secret.length < 32) {
-    console.warn('⚠️ WARNING: JWT_SECRET should be at least 32 characters for security');
-  }
-  
+
   return secret;
 }
 
@@ -53,13 +39,9 @@ function getJWTSecret(): string {
  * JWT Configuration
  */
 export const JWT_CONFIG = {
-  /** Token expiration time */
   EXPIRES_IN: '7d' as const,
-  /** Cookie name for auth token */
   COOKIE_NAME: 'auth-token' as const,
-  /** Cookie max age in seconds (7 days) */
   COOKIE_MAX_AGE: 60 * 60 * 24 * 7,
-  /** Algorithm used for signing */
   ALGORITHM: 'HS256' as const,
 } as const;
 
@@ -81,22 +63,10 @@ export type TokenError =
 
 /**
  * Extracts and verifies JWT token from request cookies
- * 
- * @param request - Next.js request object
- * @returns Token verification result with payload or error
- * 
- * @example
- * ```typescript
- * const result = verifyRequestToken(request);
- * if (!result.valid) {
- *   return NextResponse.json({ error: result.error.message }, { status: 401 });
- * }
- * const { userId, email } = result.payload;
- * ```
  */
 export function verifyRequestToken(request: NextRequest): TokenVerificationResult {
   const token = request.cookies.get(JWT_CONFIG.COOKIE_NAME)?.value;
-  
+
   if (!token) {
     return {
       valid: false,
@@ -106,15 +76,12 @@ export function verifyRequestToken(request: NextRequest): TokenVerificationResul
       },
     };
   }
-  
+
   return verifyToken(token);
 }
 
 /**
  * Verifies a JWT token string
- * 
- * @param token - JWT token string
- * @returns Token verification result
  */
 export function verifyToken(token: string): TokenVerificationResult {
   try {
@@ -122,10 +89,10 @@ export function verifyToken(token: string): TokenVerificationResult {
     const decoded = jwt.verify(token, secret, {
       algorithms: [JWT_CONFIG.ALGORITHM],
     });
-    
+
     // Validate the decoded payload structure
     const payloadResult = JWTPayloadSchema.safeParse(decoded);
-    
+
     if (!payloadResult.success) {
       return {
         valid: false,
@@ -135,7 +102,7 @@ export function verifyToken(token: string): TokenVerificationResult {
         },
       };
     }
-    
+
     return {
       valid: true,
       payload: payloadResult.data,
@@ -144,42 +111,30 @@ export function verifyToken(token: string): TokenVerificationResult {
     if (error instanceof TokenExpiredError) {
       return {
         valid: false,
-        error: {
-          type: 'expired',
-          message: 'Authentication token has expired',
-        },
+        error: { type: 'expired', message: 'Authentication token has expired' },
       };
     }
-    
+
     if (error instanceof JsonWebTokenError) {
       return {
         valid: false,
-        error: {
-          type: 'invalid',
-          message: 'Authentication token is invalid',
-        },
+        error: { type: 'invalid', message: 'Authentication token is invalid' },
       };
     }
-    
+
     return {
       valid: false,
-      error: {
-        type: 'invalid',
-        message: 'Failed to verify authentication token',
-      },
+      error: { type: 'invalid', message: 'Failed to verify authentication token' },
     };
   }
 }
 
 /**
- * Generates a JWT token for a user
- * 
- * @param payload - User data to include in token
- * @returns Signed JWT token
+ * Generates a JWT token
  */
 export function generateToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): string {
   const secret = getJWTSecret();
-  
+
   return jwt.sign(payload, secret, {
     expiresIn: JWT_CONFIG.EXPIRES_IN,
     algorithm: JWT_CONFIG.ALGORITHM,
@@ -205,64 +160,45 @@ export interface SessionUser {
 
 /**
  * Verifies a session by checking both the token and the database
- * 
- * This provides an additional layer of security by ensuring:
- * 1. The token is valid and not expired
- * 2. The user still exists in the database
- * 3. The user account is still active
- * 
- * @param request - Next.js request object
- * @returns Session verification result with user data or error
  */
 export async function verifySession(
   request: NextRequest
 ): Promise<SessionVerificationResult> {
-  // First, verify the token
   const tokenResult = verifyRequestToken(request);
-  
+
   if (!tokenResult.valid) {
     return {
       valid: false,
       error: tokenResult.error.message,
     };
   }
-  
+
   const { userId, email, role } = tokenResult.payload;
-  
+
   try {
-    // Verify user exists in database
     const client = await clientPromise;
     const db = client.db('hackoverflow');
-    
+
     let user;
-    try {
-      user = await db.collection('users').findOne({
-        _id: new ObjectId(userId),
-        email: email, // Extra verification
+    if (role === 'participant') {
+      user = await db.collection('participants').findOne({
+        participantId: userId
       });
-    } catch {
-      // Invalid ObjectId format
-      return {
-        valid: false,
-        error: 'Invalid session',
-      };
+    } else {
+      try {
+        user = await db.collection('users').findOne({
+          _id: new ObjectId(userId),
+          email: email,
+        });
+      } catch {
+        return { valid: false, error: 'Invalid session' };
+      }
     }
-    
+
     if (!user) {
-      return {
-        valid: false,
-        error: 'User not found',
-      };
+      return { valid: false, error: 'User not found' };
     }
-    
-    // Check if user is active (if field exists)
-    if (user.isActive === false) {
-      return {
-        valid: false,
-        error: 'Account is deactivated',
-      };
-    }
-    
+
     return {
       valid: true,
       user: {
@@ -274,17 +210,12 @@ export async function verifySession(
     };
   } catch (error) {
     console.error('Session verification error:', error);
-    return {
-      valid: false,
-      error: 'Failed to verify session',
-    };
+    return { valid: false, error: 'Failed to verify session' };
   }
 }
 
 /**
  * Creates secure cookie options for the auth token
- * 
- * @returns Cookie options object
  */
 export function getSecureCookieOptions(): {
   httpOnly: boolean;
@@ -294,9 +225,9 @@ export function getSecureCookieOptions(): {
   path: string;
 } {
   return {
-    httpOnly: true, // Prevents XSS attacks
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    sameSite: 'lax', // CSRF protection
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
     maxAge: JWT_CONFIG.COOKIE_MAX_AGE,
     path: '/',
   };
@@ -304,8 +235,6 @@ export function getSecureCookieOptions(): {
 
 /**
  * Creates cookie options for clearing the auth token
- * 
- * @returns Cookie options for deletion
  */
 export function getClearCookieOptions(): {
   httpOnly: boolean;
@@ -318,13 +247,13 @@ export function getClearCookieOptions(): {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 0, // Expire immediately
+    maxAge: 0,
     path: '/',
   };
 }
 
 /**
- * Security headers to include in API responses
+ * Security headers for API responses
  */
 export const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
@@ -332,6 +261,6 @@ export const SECURITY_HEADERS: Record<string, string> = {
   'X-XSS-Protection': '1; mode=block',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-  'Pragma': 'no-cache',
-  'Expires': '0',
+  Pragma: 'no-cache',
+  Expires: '0',
 };

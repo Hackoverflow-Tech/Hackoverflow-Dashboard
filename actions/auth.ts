@@ -89,8 +89,8 @@ export async function loginAction(
   try {
     // Step 1: Rate limiting check
     const clientId = getClientIdForAction();
-    const rateLimitResult = checkRateLimit(clientId, RateLimitPresets.LOGIN);
-    
+    const rateLimitResult = await checkRateLimit(clientId, RateLimitPresets.LOGIN);
+
     if (!rateLimitResult.allowed) {
       return {
         success: false,
@@ -246,8 +246,8 @@ export async function logoutAction(): Promise<LogoutActionResult> {
   try {
     // Step 1: Rate limiting check
     const clientId = getClientIdForAction();
-    const rateLimitResult = checkRateLimit(clientId, RateLimitPresets.AUTH);
-    
+    const rateLimitResult = await checkRateLimit(clientId, RateLimitPresets.AUTH);
+
     if (!rateLimitResult.allowed) {
       return {
         success: false,
