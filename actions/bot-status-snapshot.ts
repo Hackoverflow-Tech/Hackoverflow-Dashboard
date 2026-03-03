@@ -5,8 +5,8 @@ import type { BotStatusSnapshot } from '@/actions/email-report';
 
 const DB_NAME     = process.env.MONGODB_DB || 'hackoverflow';
 const STATUS_COLL = 'bot_status';
-const STATUS_DOC  = 'kernel-bot';       // ← was 'heartbeat'
-const STALE_MS    = 2 * 60 * 1000;
+const STATUS_DOC  = 'kernel-bot';
+const STALE_MS    = 10 * 60 * 1000;  // 10 min — safe for hourly email reports
 
 export async function getBotStatusSnapshot(): Promise<BotStatusSnapshot> {
   const empty: BotStatusSnapshot = {
@@ -33,7 +33,6 @@ export async function getBotStatusSnapshot(): Promise<BotStatusSnapshot> {
 
     const staleMs  = lastSeen ? Date.now() - new Date(lastSeen).getTime() : undefined;
 
-    // Bot writes `alive`, not `online` — respect it AND check staleness
     const isOnline =
       doc.alive === true &&
       typeof staleMs === 'number' &&
