@@ -13,18 +13,23 @@ export interface BackupResult {
 
 async function uploadToDrive(csv: string, filename: string): Promise<string> {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
 
-  if (!email) throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL is not set');
-  if (!key)   throw new Error('GOOGLE_PRIVATE_KEY is not set');
+  if (!email)  throw new Error('[Backup] GOOGLE_SERVICE_ACCOUNT_EMAIL is not set');
+  if (!rawKey) throw new Error('[Backup] GOOGLE_PRIVATE_KEY is not set');
 
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: email,
-      private_key:  key,
-    },
+  // Handle both formats: literal \n text OR real newlines
+  const key = rawKey.includes('\\n')
+    ? rawKey.replace(/\\n/g, '\n')
+    : rawKey;
+
+  const auth = new google.auth.JWT({
+    email,
+    key,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
   });
+
+  await auth.authorize();
 
   const drive = google.drive({ version: 'v3', auth });
 
